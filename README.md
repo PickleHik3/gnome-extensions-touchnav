@@ -5,9 +5,9 @@ Standalone GNOME Shell extension that provides a draggable floating back button.
 ## Install locally
 
 1. Copy this directory to:
-   `~/.local/share/gnome-shell/extensions/tnav@amalv`
+   `~/.local/share/gnome-shell/extensions/tnav@picklehik3.github.io`
 2. Enable with:
-   `gnome-extensions enable tnav@amalv`
+   `gnome-extensions enable tnav@picklehik3.github.io`
 
 ## Behavior
 

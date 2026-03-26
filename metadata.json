@@ -1,5 +1,5 @@
 {
-  "uuid": "tnav@amalv",
+  "uuid": "tnav@picklehik3.github.io",
   "name": "Touch Nav Back",
   "description": "Standalone floating back button for GNOME Shell.",
   "shell-version": ["47", "48", "49"],
