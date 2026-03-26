@@ -11,6 +11,13 @@ const GESTURE_START_DISTANCE = 12;
 const GESTURE_COMMIT_DISTANCE = 44;
 const DIRECTION_DOMINANCE = 1.15;
 
+const SNAP_DURATION_MS = 260;
+const PRESS_FEEDBACK_MS = 220;
+const COMMIT_PULSE_IN_MS = 180;
+const COMMIT_PULSE_OUT_MS = 240;
+
+const DEFAULT_BASE_COLOR = {r: 22, g: 22, b: 22};
+
 const SwipeAction = Object.freeze({
     none: 'none',
     back: 'back',
@@ -18,10 +25,18 @@ const SwipeAction = Object.freeze({
     apps: 'apps',
 });
 
-export default class TouchNavBackExtension extends Extension {
+const SWIPE_KEYS = Object.freeze({
+    left: 'swipe-left-action',
+    right: 'swipe-right-action',
+    up: 'swipe-up-action',
+    down: 'swipe-down-action',
+});
+
+export default class TouchNavExtension extends Extension {
     enable() {
         this._settings = this.getSettings('org.gnome.shell.extensions.tnav');
         this._settingsSignalIds = [];
+        this._visualState = 'idle';
 
         this._floatingState = {
             pressed: false,
@@ -35,7 +50,8 @@ export default class TouchNavBackExtension extends Extension {
         };
 
         const sf = St.ThemeContext.get_for_stage(global.stage).scaleFactor;
-        const size = Math.floor(46 * sf);
+        const size = Math.floor(54 * sf);
+        const faceSize = Math.floor(28 * sf);
 
         this._virtualKeyboardDevice = Clutter
             .get_default_backend()
@@ -50,17 +66,39 @@ export default class TouchNavBackExtension extends Extension {
             width: size,
             height: size,
         });
-        this._floatingIcon = new St.Icon({
-            icon_name: 'media-record-symbolic',
-            icon_size: Math.floor(16 * sf),
-            style_class: 'tnav-back-button-icon',
+
+        this._floatingFace = new St.Bin({
+            style_class: 'tnav-back-button-face',
+            width: faceSize,
+            height: faceSize,
+            x_align: Clutter.ActorAlign.CENTER,
+            y_align: Clutter.ActorAlign.CENTER,
         });
-        this._floatingButton.set_child(this._floatingIcon);
+
+        this._floatingIcon = new St.Icon({
+            icon_name: 'go-previous-symbolic',
+            icon_size: Math.floor(18 * sf),
+            style_class: 'tnav-back-button-icon',
+            x_align: Clutter.ActorAlign.CENTER,
+            y_align: Clutter.ActorAlign.CENTER,
+            opacity: 0,
+        });
+
+        this._floatingFace.set_child(this._floatingIcon);
+        this._floatingButton.set_child(this._floatingFace);
+
         this._capturedEventId = this._floatingButton.connect('captured-event', (_w, event) => this._onCapturedEvent(event));
 
         this._settingsSignalIds.push(
             this._settings.connect('changed::floating', () => this._syncPlacement()),
             this._settings.connect('changed::panel-section', () => this._syncPlacement()),
+            this._settings.connect('changed::floating-opacity', () => this._refreshFloatingStyle()),
+            this._settings.connect('changed::floating-use-gnome-default-color', () => this._refreshFloatingStyle()),
+            this._settings.connect('changed::floating-color', () => this._refreshFloatingStyle()),
+            this._settings.connect('changed::swipe-left-action', () => this._refreshFloatingStyle()),
+            this._settings.connect('changed::swipe-right-action', () => this._refreshFloatingStyle()),
+            this._settings.connect('changed::swipe-up-action', () => this._refreshFloatingStyle()),
+            this._settings.connect('changed::swipe-down-action', () => this._refreshFloatingStyle()),
         );
 
         this._syncPlacement();
@@ -80,6 +118,7 @@ export default class TouchNavBackExtension extends Extension {
 
             this._floatingButton.destroy();
             this._floatingButton = null;
+            this._floatingFace = null;
             this._floatingIcon = null;
         }
 
@@ -107,6 +146,7 @@ export default class TouchNavBackExtension extends Extension {
     _ensureFloatingButton() {
         if (!this._floatingButton)
             return;
+
         if (!this._floatingButtonAdded) {
             Main.layoutManager.addTopChrome(this._floatingButton, {
                 affectsStruts: false,
@@ -114,7 +154,9 @@ export default class TouchNavBackExtension extends Extension {
             });
             this._floatingButtonAdded = true;
         }
+
         this._ensureHomePosition();
+        this._snapHomeToNearestEdge();
         this._snapToHomePosition({animate: false});
         this._setVisualState('idle');
     }
@@ -122,6 +164,7 @@ export default class TouchNavBackExtension extends Extension {
     _removeFloatingButton() {
         if (!this._floatingButton || !this._floatingButtonAdded)
             return;
+
         this._cancelLongPressTimer();
         this._floatingState.pressed = false;
         Main.layoutManager.removeChrome(this._floatingButton);
@@ -151,6 +194,7 @@ export default class TouchNavBackExtension extends Extension {
     _removePanelButton() {
         if (!this._panelButton)
             return;
+
         this._panelButton.get_parent()?.remove_child(this._panelButton);
         this._panelButton.destroy();
         this._panelButton = null;
@@ -166,6 +210,7 @@ export default class TouchNavBackExtension extends Extension {
     _ensureHomePosition() {
         if (this._floatingState.homePosition)
             return;
+
         const monitor = Main.layoutManager.primaryMonitor;
         if (!monitor || !this._floatingButton)
             return;
@@ -224,6 +269,7 @@ export default class TouchNavBackExtension extends Extension {
         this._floatingState.longPressTimeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, LONG_PRESS_MS, () => {
             if (!this._floatingState.pressed || this._floatingState.gestureMode)
                 return GLib.SOURCE_REMOVE;
+
             this._floatingState.repositionMode = true;
             this._setVisualState('reposition');
             this._floatingState.longPressTimeoutId = 0;
@@ -265,14 +311,17 @@ export default class TouchNavBackExtension extends Extension {
         if (state.repositionMode) {
             const [x, y] = this._floatingButton.get_position();
             state.homePosition = {x, y};
+            this._snapHomeToNearestEdge();
+            this._snapToHomePosition({animate: true});
             state.repositionMode = false;
             this._setVisualState('idle');
             return;
         }
 
         if (state.gestureMode) {
-            const dx = this._floatingButton.get_position()[0] - state.homePosition.x;
-            const dy = this._floatingButton.get_position()[1] - state.homePosition.y;
+            const [x, y] = this._floatingButton.get_position();
+            const dx = x - state.homePosition.x;
+            const dy = y - state.homePosition.y;
             const committed = Math.hypot(dx, dy) >= GESTURE_COMMIT_DISTANCE && state.activeAction !== SwipeAction.none;
 
             if (committed) {
@@ -289,7 +338,7 @@ export default class TouchNavBackExtension extends Extension {
 
         this._setVisualState('pressed-back');
         this._triggerBack();
-        GLib.timeout_add(GLib.PRIORITY_DEFAULT, 120, () => {
+        GLib.timeout_add(GLib.PRIORITY_DEFAULT, PRESS_FEEDBACK_MS, () => {
             this._setVisualState('idle');
             return GLib.SOURCE_REMOVE;
         });
@@ -323,12 +372,42 @@ export default class TouchNavBackExtension extends Extension {
             this._floatingButton.ease({
                 x: home.x,
                 y: home.y,
-                duration: 140,
+                duration: SNAP_DURATION_MS,
                 mode: Clutter.AnimationMode.EASE_OUT_QUAD,
             });
         } else {
             this._floatingButton.set_position(home.x, home.y);
         }
+    }
+
+    _snapHomeToNearestEdge() {
+        if (!this._floatingButton || !this._floatingState.homePosition)
+            return;
+
+        const size = this._floatingButton.width;
+        const monitor = this._monitorForPoint(this._floatingState.homePosition.x + size / 2, this._floatingState.homePosition.y + size / 2);
+        if (!monitor)
+            return;
+
+        const sf = St.ThemeContext.get_for_stage(global.stage).scaleFactor;
+        const margin = Math.floor(8 * sf);
+        const leftX = monitor.x + margin;
+        const rightX = monitor.x + monitor.width - size - margin;
+
+        const currentX = this._floatingState.homePosition.x;
+        this._floatingState.homePosition.x = Math.abs(currentX - leftX) <= Math.abs(currentX - rightX) ? leftX : rightX;
+        this._floatingState.homePosition.y = Math.max(
+            monitor.y + margin,
+            Math.min(this._floatingState.homePosition.y, monitor.y + monitor.height - size - margin),
+        );
+    }
+
+    _monitorForPoint(x, y) {
+        const rect = new Mtk.Rectangle({x: Math.floor(x), y: Math.floor(y), width: 1, height: 1});
+        const index = global.display.get_monitor_index_for_rect(rect);
+        if (index < 0)
+            return Main.layoutManager.primaryMonitor ?? null;
+        return global.display.get_monitor_geometry(index);
     }
 
     _detectSwipeAction(dx, dy) {
@@ -338,13 +417,22 @@ export default class TouchNavBackExtension extends Extension {
         if (Math.hypot(dx, dy) < GESTURE_START_DISTANCE)
             return SwipeAction.none;
 
-        if (absX > absY * DIRECTION_DOMINANCE) {
-            return dx < 0 ? SwipeAction.back : SwipeAction.none;
-        }
-        if (absY > absX * DIRECTION_DOMINANCE) {
-            return dy < 0 ? SwipeAction.overview : SwipeAction.apps;
-        }
+        if (absX > absY * DIRECTION_DOMINANCE)
+            return this._actionForDirection(dx < 0 ? 'left' : 'right');
+
+        if (absY > absX * DIRECTION_DOMINANCE)
+            return this._actionForDirection(dy < 0 ? 'up' : 'down');
+
         return SwipeAction.none;
+    }
+
+    _actionForDirection(direction) {
+        const key = SWIPE_KEYS[direction];
+        if (!key || !this._settings)
+            return SwipeAction.none;
+
+        const value = this._settings.get_string(key);
+        return Object.values(SwipeAction).includes(value) ? value : SwipeAction.none;
     }
 
     _runSwipeAction(action) {
@@ -364,8 +452,10 @@ export default class TouchNavBackExtension extends Extension {
     }
 
     _setVisualState(state) {
-        if (!this._floatingButton || !this._floatingIcon)
+        if (!this._floatingButton || !this._floatingIcon || !this._floatingFace)
             return;
+
+        this._visualState = state;
 
         const classes = [
             'tnav-back-button--pressed',
@@ -373,62 +463,162 @@ export default class TouchNavBackExtension extends Extension {
             'tnav-back-button--preview-back',
             'tnav-back-button--preview-overview',
             'tnav-back-button--preview-apps',
+            'tnav-back-button--preview-none',
         ];
         for (const c of classes)
             this._floatingButton.remove_style_class_name(c);
 
         switch (state) {
             case 'idle':
-                this._floatingIcon.icon_name = 'media-record-symbolic';
+                this._floatingIcon.icon_name = 'go-previous-symbolic';
+                this._floatingIcon.opacity = 0;
                 this._floatingButton.set_scale(1.0, 1.0);
                 break;
             case 'pressed':
             case 'pressed-back':
                 this._floatingIcon.icon_name = 'go-previous-symbolic';
+                this._floatingIcon.opacity = 255;
                 this._floatingButton.add_style_class_name('tnav-back-button--pressed');
                 this._floatingButton.ease({
                     scale_x: 0.94,
                     scale_y: 0.94,
-                    duration: 90,
+                    duration: 140,
                     mode: Clutter.AnimationMode.EASE_OUT_QUAD,
                     onStopped: () => this._floatingButton.set_scale(1.0, 1.0),
                 });
                 break;
             case 'reposition':
-                this._floatingIcon.icon_name = 'media-record-symbolic';
+                this._floatingIcon.icon_name = 'view-pin-symbolic';
+                this._floatingIcon.opacity = 255;
                 this._floatingButton.add_style_class_name('tnav-back-button--reposition');
                 break;
             case `preview-${SwipeAction.back}`:
                 this._floatingIcon.icon_name = 'go-previous-symbolic';
+                this._floatingIcon.opacity = 255;
                 this._floatingButton.add_style_class_name('tnav-back-button--preview-back');
                 break;
             case `preview-${SwipeAction.overview}`:
-                this._floatingIcon.icon_name = 'view-grid-symbolic';
+                this._floatingIcon.icon_name = 'focus-windows-symbolic';
+                this._floatingIcon.opacity = 255;
                 this._floatingButton.add_style_class_name('tnav-back-button--preview-overview');
                 break;
             case `preview-${SwipeAction.apps}`:
                 this._floatingIcon.icon_name = 'view-app-grid-symbolic';
+                this._floatingIcon.opacity = 255;
                 this._floatingButton.add_style_class_name('tnav-back-button--preview-apps');
                 break;
             default:
-                this._floatingIcon.icon_name = 'media-record-symbolic';
+                this._floatingIcon.icon_name = 'go-previous-symbolic';
+                this._floatingIcon.opacity = 0;
+                this._floatingButton.add_style_class_name('tnav-back-button--preview-none');
                 break;
         }
+
+        this._refreshFloatingStyle();
+    }
+
+    _refreshFloatingStyle() {
+        if (!this._floatingButton || !this._floatingFace || !this._settings)
+            return;
+
+        const opacity = Math.max(20, Math.min(100, this._settings.get_int('floating-opacity'))) / 100;
+        const color = this._getConfiguredBaseColor();
+
+        const visual = this._computeVisualStyle(this._visualState, color, opacity);
+        this._floatingButton.set_style(`background-color: ${visual.buttonBg};`);
+        this._floatingFace.set_style(`
+            border-radius: 999px;
+            border-width: ${visual.faceBorderWidth}px;
+            border-color: ${visual.faceBorderColor};
+            background-color: ${visual.faceBg};
+            padding: 0;
+        `);
+    }
+
+    _computeVisualStyle(state, color, opacity) {
+        const colorToCss = (c, a) => `rgba(${c.r}, ${c.g}, ${c.b}, ${Math.max(0, Math.min(1, a)).toFixed(3)})`;
+        const withMul = (mul) => ({
+            r: Math.max(0, Math.min(255, Math.round(color.r * mul))),
+            g: Math.max(0, Math.min(255, Math.round(color.g * mul))),
+            b: Math.max(0, Math.min(255, Math.round(color.b * mul))),
+        });
+
+        let buttonColor = color;
+        let buttonAlpha = opacity;
+        let faceBg = 'transparent';
+        let faceBorderColor = colorToCss({r: 255, g: 255, b: 255}, 0.84);
+        let faceBorderWidth = 2;
+
+        if (state === 'pressed' || state === 'pressed-back') {
+            buttonColor = withMul(1.25);
+            buttonAlpha = Math.min(1, opacity + 0.06);
+            faceBg = colorToCss({r: 255, g: 255, b: 255}, 0.16);
+            faceBorderColor = colorToCss({r: 255, g: 255, b: 255}, 0.96);
+            faceBorderWidth = 1;
+        } else if (state === 'reposition') {
+            buttonColor = withMul(1.32);
+            buttonAlpha = Math.min(1, opacity + 0.06);
+            faceBg = colorToCss({r: 255, g: 255, b: 255}, 0.12);
+            faceBorderColor = colorToCss({r: 255, g: 255, b: 255}, 0.92);
+            faceBorderWidth = 1;
+        } else if (state === `preview-${SwipeAction.back}`) {
+            buttonColor = {r: 58, g: 74, b: 110};
+            buttonAlpha = Math.min(1, opacity + 0.08);
+            faceBg = colorToCss({r: 76, g: 133, b: 255}, 0.24);
+            faceBorderColor = colorToCss({r: 206, g: 224, b: 255}, 0.95);
+            faceBorderWidth = 1;
+        } else if (state === `preview-${SwipeAction.overview}`) {
+            buttonColor = {r: 56, g: 94, b: 78};
+            buttonAlpha = Math.min(1, opacity + 0.08);
+            faceBg = colorToCss({r: 95, g: 220, b: 165}, 0.22);
+            faceBorderColor = colorToCss({r: 221, g: 255, b: 241}, 0.95);
+            faceBorderWidth = 1;
+        } else if (state === `preview-${SwipeAction.apps}`) {
+            buttonColor = {r: 92, g: 73, b: 52};
+            buttonAlpha = Math.min(1, opacity + 0.08);
+            faceBg = colorToCss({r: 255, g: 170, b: 92}, 0.22);
+            faceBorderColor = colorToCss({r: 255, g: 236, b: 213}, 0.95);
+            faceBorderWidth = 1;
+        }
+
+        return {
+            buttonBg: colorToCss(buttonColor, buttonAlpha),
+            faceBg,
+            faceBorderColor,
+            faceBorderWidth,
+        };
+    }
+
+    _getConfiguredBaseColor() {
+        if (this._settings.get_boolean('floating-use-gnome-default-color'))
+            return DEFAULT_BASE_COLOR;
+
+        const colorText = this._settings.get_string('floating-color') || '#161616';
+        const [ok, parsed] = Clutter.Color.from_string(colorText);
+        if (!ok)
+            return DEFAULT_BASE_COLOR;
+
+        return {
+            r: parsed.red,
+            g: parsed.green,
+            b: parsed.blue,
+        };
     }
 
     _animateCommitPulse() {
         if (!this._floatingButton)
             return;
+
         this._floatingButton.ease({
-            scale_x: 1.13,
-            scale_y: 1.13,
-            duration: 90,
+            scale_x: 1.12,
+            scale_y: 1.12,
+            duration: COMMIT_PULSE_IN_MS,
             mode: Clutter.AnimationMode.EASE_OUT_QUAD,
             onStopped: () => {
                 this._floatingButton.ease({
                     scale_x: 1.0,
                     scale_y: 1.0,
-                    duration: 110,
+                    duration: COMMIT_PULSE_OUT_MS,
                     mode: Clutter.AnimationMode.EASE_OUT_QUAD,
                 });
             },
@@ -523,6 +713,7 @@ export default class TouchNavBackExtension extends Extension {
     _sendEsc() {
         if (!this._virtualKeyboardDevice)
             return;
+
         const t = Clutter.get_current_event_time() * 1000;
         this._virtualKeyboardDevice.notify_keyval(t, Clutter.KEY_Escape, Clutter.KeyState.PRESSED);
         this._virtualKeyboardDevice.notify_keyval(t, Clutter.KEY_Escape, Clutter.KeyState.RELEASED);
@@ -531,6 +722,7 @@ export default class TouchNavBackExtension extends Extension {
     _sendAltLeft() {
         if (!this._virtualKeyboardDevice)
             return;
+
         const t = Clutter.get_current_event_time() * 1000;
         this._virtualKeyboardDevice.notify_keyval(t, Clutter.KEY_Alt_L, Clutter.KeyState.PRESSED);
         this._virtualKeyboardDevice.notify_keyval(t, Clutter.KEY_Left, Clutter.KeyState.PRESSED);

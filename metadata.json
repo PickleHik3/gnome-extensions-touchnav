@@ -1,9 +1,9 @@
 {
   "uuid": "tnav@picklehik3.github.io",
-  "name": "Touch Nav Back",
-  "description": "Standalone floating back button for GNOME Shell.",
+  "name": "touchnav",
+  "description": "Floating back/gesture navigation button for GNOME Shell.",
   "shell-version": ["47", "48", "49"],
   "settings-schema": "org.gnome.shell.extensions.tnav",
-  "version": 3,
-  "url": "https://github.com/PickleHik3/gnome-extension-tnav"
+  "version": 4,
+  "url": "https://github.com/PickleHik3/gnome-extensions-touchnav"
 }

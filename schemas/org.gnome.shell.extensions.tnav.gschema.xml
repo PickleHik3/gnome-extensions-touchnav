@@ -17,5 +17,72 @@
       <summary>Panel section</summary>
       <description>Panel box section where the button is shown when floating is disabled.</description>
     </key>
+
+    <key name="floating-opacity" type="i">
+      <default>92</default>
+      <range min="20" max="100"/>
+      <summary>Floating button opacity</summary>
+      <description>Opacity of the floating button in percent.</description>
+    </key>
+
+    <key name="floating-use-gnome-default-color" type="b">
+      <default>true</default>
+      <summary>Use GNOME default floating button color</summary>
+      <description>If true, use the extension default GNOME-style color. If false, use the custom floating color value.</description>
+    </key>
+
+    <key name="floating-color" type="s">
+      <default>'#161616'</default>
+      <summary>Custom floating button color</summary>
+      <description>Hex color used for the floating button background when GNOME default color is disabled.</description>
+    </key>
+
+    <key name="swipe-left-action" type="s">
+      <default>'back'</default>
+      <choices>
+        <choice value='none'/>
+        <choice value='back'/>
+        <choice value='overview'/>
+        <choice value='apps'/>
+      </choices>
+      <summary>Swipe left action</summary>
+      <description>Action executed when swiping left from the floating button.</description>
+    </key>
+
+    <key name="swipe-up-action" type="s">
+      <default>'overview'</default>
+      <choices>
+        <choice value='none'/>
+        <choice value='back'/>
+        <choice value='overview'/>
+        <choice value='apps'/>
+      </choices>
+      <summary>Swipe up action</summary>
+      <description>Action executed when swiping up from the floating button.</description>
+    </key>
+
+    <key name="swipe-down-action" type="s">
+      <default>'apps'</default>
+      <choices>
+        <choice value='none'/>
+        <choice value='back'/>
+        <choice value='overview'/>
+        <choice value='apps'/>
+      </choices>
+      <summary>Swipe down action</summary>
+      <description>Action executed when swiping down from the floating button.</description>
+    </key>
+
+    <key name="swipe-right-action" type="s">
+      <default>'none'</default>
+      <choices>
+        <choice value='none'/>
+        <choice value='back'/>
+        <choice value='overview'/>
+        <choice value='apps'/>
+      </choices>
+      <summary>Swipe right action</summary>
+      <description>Action executed when swiping right from the floating button.</description>
+    </key>
   </schema>
 </schemalist>

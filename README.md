@@ -1,6 +1,6 @@
-# gnome-extension-tnav
+# gnome-extensions-touchnav
 
-Standalone GNOME Shell extension that provides a draggable floating back button.
+Standalone GNOME Shell extension that provides a floating touch navigation button.
 
 ## Install locally
 
@@ -11,5 +11,6 @@ Standalone GNOME Shell extension that provides a draggable floating back button.
 
 ## Behavior
 
-- Tap button: sends `Alt+Left` (browser-style back)
-- Drag button: move anywhere on screen
+- Tap: Smart back chain (hide apps grid/overview, close transient UI, then back key events)
+- Long-press + drag: reposition button, then it snaps to nearest screen edge
+- Swipe directions: configurable actions (`none`, `back`, `overview`, `apps`)

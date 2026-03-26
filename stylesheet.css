@@ -1,39 +1,43 @@
 .tnav-back-button {
-  background-color: rgba(22, 22, 22, 0.92);
   border-radius: 999px;
   color: white;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  transition-duration: 260ms;
+  transition-property: background-color, border-color, box-shadow;
 }
 
 .tnav-back-button:hover {
-  background-color: rgba(34, 34, 34, 0.95);
+  border-color: rgba(255, 255, 255, 0.26);
+}
+
+.tnav-back-button-face {
+  border-style: solid;
+  border-radius: 999px;
+  transition-duration: 240ms;
+  transition-property: background-color, border-color, border-width;
 }
 
 .tnav-back-button .tnav-back-button-icon {
-  icon-size: 16px;
+  icon-size: 18px;
 }
 
 .tnav-back-button--pressed {
-  background-color: rgba(44, 44, 44, 0.96);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
 }
 
 .tnav-back-button--reposition {
-  background-color: rgba(58, 58, 58, 0.96);
-  border: 1px dashed rgba(255, 255, 255, 0.25);
+  border-style: dashed;
+  border-color: rgba(255, 255, 255, 0.35);
 }
 
 .tnav-back-button--preview-back {
-  background-color: rgba(58, 74, 110, 0.97);
   box-shadow: 0 0 16px rgba(76, 133, 255, 0.42);
 }
 
 .tnav-back-button--preview-overview {
-  background-color: rgba(58, 95, 78, 0.97);
-  box-shadow: 0 0 16px rgba(74, 201, 143, 0.38);
+  box-shadow: 0 0 16px rgba(74, 201, 143, 0.4);
 }
 
 .tnav-back-button--preview-apps {
-  background-color: rgba(92, 73, 52, 0.97);
-  box-shadow: 0 0 16px rgba(255, 170, 92, 0.40);
+  box-shadow: 0 0 16px rgba(255, 170, 92, 0.42);
 }

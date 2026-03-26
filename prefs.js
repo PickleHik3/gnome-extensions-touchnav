@@ -1,5 +1,6 @@
 import Adw from 'gi://Adw';
 import Gtk from 'gi://Gtk';
+import Gdk from 'gi://Gdk';
 import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
 export default class TouchNavBackPrefs extends ExtensionPreferences {
@@ -7,54 +8,143 @@ export default class TouchNavBackPrefs extends ExtensionPreferences {
         const settings = this.getSettings('org.gnome.shell.extensions.tnav');
 
         const page = new Adw.PreferencesPage({
-            title: 'General',
+            title: 'Touchnav',
             icon_name: 'preferences-system-symbolic',
         });
 
-        const group = new Adw.PreferencesGroup({
-            title: 'Button Placement',
-        });
-
+        const placement = new Adw.PreferencesGroup({title: 'Placement'});
         const floatingRow = new Adw.SwitchRow({
             title: 'Floating',
-            subtitle: 'Show as draggable floating button',
+            subtitle: 'Show as movable on-screen button',
         });
         settings.bind('floating', floatingRow, 'active', 0);
+        placement.add(floatingRow);
 
-        const sections = ['left', 'center', 'right'];
-        const sectionLabels = ['Left', 'Center', 'Right'];
-        const sectionRow = new Adw.ActionRow({
+        const panelSectionRow = this._buildDropdownRow({
             title: 'Panel Section',
             subtitle: 'Used when Floating is disabled',
+            values: ['left', 'center', 'right'],
+            labels: ['Left', 'Center', 'Right'],
+            get: () => settings.get_string('panel-section'),
+            set: (v) => settings.set_string('panel-section', v),
         });
-        const sectionDropdown = Gtk.DropDown.new_from_strings(sectionLabels);
-        sectionDropdown.valign = Gtk.Align.CENTER;
-        sectionRow.add_suffix(sectionDropdown);
+        panelSectionRow.row.visible = !settings.get_boolean('floating');
+        settings.connect('changed::floating', () => {
+            panelSectionRow.row.visible = !settings.get_boolean('floating');
+        });
+        placement.add(panelSectionRow.row);
+        page.add(placement);
 
-        const syncSectionFromSettings = () => {
-            const value = settings.get_string('panel-section');
-            const idx = Math.max(0, sections.indexOf(value));
-            if (sectionDropdown.selected !== idx)
-                sectionDropdown.selected = idx;
+        const appearance = new Adw.PreferencesGroup({title: 'Appearance'});
+        const opacityRow = new Adw.SpinRow({
+            title: 'Opacity',
+            subtitle: 'Floating button opacity in percent',
+            adjustment: new Gtk.Adjustment({
+                lower: 20,
+                upper: 100,
+                step_increment: 1,
+                page_increment: 5,
+                value: settings.get_int('floating-opacity'),
+            }),
+        });
+        opacityRow.connect('notify::value', () => {
+            settings.set_int('floating-opacity', Math.round(opacityRow.value));
+        });
+        settings.connect('changed::floating-opacity', () => {
+            const v = settings.get_int('floating-opacity');
+            if (Math.round(opacityRow.value) !== v)
+                opacityRow.value = v;
+        });
+        appearance.add(opacityRow);
+
+        const useDefaultRow = new Adw.SwitchRow({
+            title: 'Use GNOME Default Color',
+            subtitle: 'Use default Touchnav GNOME-style floating color',
+        });
+        settings.bind('floating-use-gnome-default-color', useDefaultRow, 'active', 0);
+        appearance.add(useDefaultRow);
+
+        const colorRow = new Adw.ActionRow({
+            title: 'Floating Color',
+            subtitle: 'Custom color (used when GNOME default color is disabled)',
+        });
+        const colorButton = new Gtk.ColorButton({valign: Gtk.Align.CENTER});
+        colorRow.add_suffix(colorButton);
+        const updateColorButton = () => {
+            const rgba = new Gdk.RGBA();
+            rgba.parse(settings.get_string('floating-color'));
+            colorButton.rgba = rgba;
+            colorRow.visible = !settings.get_boolean('floating-use-gnome-default-color');
+        };
+        updateColorButton();
+        colorButton.connect('color-set', () => {
+            settings.set_string('floating-color', colorButton.rgba.to_string());
+        });
+        settings.connect('changed::floating-color', updateColorButton);
+        settings.connect('changed::floating-use-gnome-default-color', updateColorButton);
+        appearance.add(colorRow);
+        page.add(appearance);
+
+        const gestures = new Adw.PreferencesGroup({title: 'Swipe Actions'});
+        const actions = {
+            values: ['none', 'back', 'overview', 'apps'],
+            labels: ['None', 'Back', 'Overview/Workspaces', 'Apps Launcher'],
         };
 
-        const syncVisibility = () => {
-            sectionRow.visible = !settings.get_boolean('floating');
-        };
+        gestures.add(this._buildDropdownRow({
+            title: 'Swipe Left',
+            values: actions.values,
+            labels: actions.labels,
+            get: () => settings.get_string('swipe-left-action'),
+            set: (v) => settings.set_string('swipe-left-action', v),
+        }).row);
 
-        sectionDropdown.connect('notify::selected', () => {
-            settings.set_string('panel-section', sections[sectionDropdown.selected] ?? 'right');
-        });
+        gestures.add(this._buildDropdownRow({
+            title: 'Swipe Up',
+            values: actions.values,
+            labels: actions.labels,
+            get: () => settings.get_string('swipe-up-action'),
+            set: (v) => settings.set_string('swipe-up-action', v),
+        }).row);
 
-        settings.connect('changed::panel-section', syncSectionFromSettings);
-        settings.connect('changed::floating', syncVisibility);
+        gestures.add(this._buildDropdownRow({
+            title: 'Swipe Down',
+            values: actions.values,
+            labels: actions.labels,
+            get: () => settings.get_string('swipe-down-action'),
+            set: (v) => settings.set_string('swipe-down-action', v),
+        }).row);
 
-        syncSectionFromSettings();
-        syncVisibility();
+        gestures.add(this._buildDropdownRow({
+            title: 'Swipe Right',
+            values: actions.values,
+            labels: actions.labels,
+            get: () => settings.get_string('swipe-right-action'),
+            set: (v) => settings.set_string('swipe-right-action', v),
+        }).row);
 
-        group.add(floatingRow);
-        group.add(sectionRow);
-        page.add(group);
+        page.add(gestures);
         window.add(page);
+    }
+
+    _buildDropdownRow(props) {
+        const row = new Adw.ActionRow({
+            title: props.title,
+            subtitle: props.subtitle ?? '',
+        });
+        const dd = Gtk.DropDown.new_from_strings(props.labels);
+        dd.valign = Gtk.Align.CENTER;
+        row.add_suffix(dd);
+
+        const sync = () => {
+            const value = props.get();
+            const idx = Math.max(0, props.values.indexOf(value));
+            if (dd.selected !== idx)
+                dd.selected = idx;
+        };
+        sync();
+        dd.connect('notify::selected', () => props.set(props.values[dd.selected] ?? props.values[0]));
+
+        return {row, dd, sync};
     }
 }
