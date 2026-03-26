@@ -1,9 +1,39 @@
 .tnav-back-button {
-  background-color: rgba(24, 24, 24, 0.92);
+  background-color: rgba(22, 22, 22, 0.92);
   border-radius: 999px;
   color: white;
+  border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
 .tnav-back-button:hover {
-  background-color: rgba(36, 36, 36, 0.95);
+  background-color: rgba(34, 34, 34, 0.95);
+}
+
+.tnav-back-button .tnav-back-button-icon {
+  icon-size: 16px;
+}
+
+.tnav-back-button--pressed {
+  background-color: rgba(44, 44, 44, 0.96);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+}
+
+.tnav-back-button--reposition {
+  background-color: rgba(58, 58, 58, 0.96);
+  border: 1px dashed rgba(255, 255, 255, 0.25);
+}
+
+.tnav-back-button--preview-back {
+  background-color: rgba(58, 74, 110, 0.97);
+  box-shadow: 0 0 16px rgba(76, 133, 255, 0.42);
+}
+
+.tnav-back-button--preview-overview {
+  background-color: rgba(58, 95, 78, 0.97);
+  box-shadow: 0 0 16px rgba(74, 201, 143, 0.38);
+}
+
+.tnav-back-button--preview-apps {
+  background-color: rgba(92, 73, 52, 0.97);
+  box-shadow: 0 0 16px rgba(255, 170, 92, 0.40);
 }

@@ -6,15 +6,33 @@ import Meta from 'gi://Meta';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
+const LONG_PRESS_MS = 350;
+const GESTURE_START_DISTANCE = 12;
+const GESTURE_COMMIT_DISTANCE = 44;
+const DIRECTION_DOMINANCE = 1.15;
+
+const SwipeAction = Object.freeze({
+    none: 'none',
+    back: 'back',
+    overview: 'overview',
+    apps: 'apps',
+});
+
 export default class TouchNavBackExtension extends Extension {
     enable() {
         this._settings = this.getSettings('org.gnome.shell.extensions.tnav');
         this._settingsSignalIds = [];
 
-        this._dragging = false;
-        this._didDragRecently = false;
-        this._dragOffset = {x: 0, y: 0};
-        this._dragStartPointer = {x: 0, y: 0};
+        this._floatingState = {
+            pressed: false,
+            gestureMode: false,
+            repositionMode: false,
+            pressStart: {x: 0, y: 0},
+            dragOffset: {x: 0, y: 0},
+            activeAction: SwipeAction.none,
+            longPressTimeoutId: 0,
+            homePosition: null,
+        };
 
         const sf = St.ThemeContext.get_for_stage(global.stage).scaleFactor;
         const size = Math.floor(46 * sf);
@@ -32,16 +50,12 @@ export default class TouchNavBackExtension extends Extension {
             width: size,
             height: size,
         });
-        this._floatingButton.set_child(new St.Icon({
-            icon_name: 'go-previous-symbolic',
-            icon_size: Math.floor(19 * sf),
-        }));
-
-        this._floatingButton.connect('clicked', () => {
-            if (!this._didDragRecently)
-                this._triggerBack();
+        this._floatingIcon = new St.Icon({
+            icon_name: 'media-record-symbolic',
+            icon_size: Math.floor(16 * sf),
+            style_class: 'tnav-back-button-icon',
         });
-
+        this._floatingButton.set_child(this._floatingIcon);
         this._capturedEventId = this._floatingButton.connect('captured-event', (_w, event) => this._onCapturedEvent(event));
 
         this._settingsSignalIds.push(
@@ -53,6 +67,7 @@ export default class TouchNavBackExtension extends Extension {
     }
 
     disable() {
+        this._cancelLongPressTimer();
         this._settingsSignalIds?.forEach((id) => this._settings.disconnect(id));
         this._settingsSignalIds = [];
 
@@ -60,15 +75,15 @@ export default class TouchNavBackExtension extends Extension {
             if (this._capturedEventId)
                 this._floatingButton.disconnect(this._capturedEventId);
 
-            if (this._floatingButtonAdded) {
+            if (this._floatingButtonAdded)
                 Main.layoutManager.removeChrome(this._floatingButton);
-            }
+
             this._floatingButton.destroy();
             this._floatingButton = null;
+            this._floatingIcon = null;
         }
 
         this._removePanelButton();
-
         this._virtualKeyboardDevice = null;
         this._settings = null;
     }
@@ -99,12 +114,16 @@ export default class TouchNavBackExtension extends Extension {
             });
             this._floatingButtonAdded = true;
         }
-        this._placeBottomRight();
+        this._ensureHomePosition();
+        this._snapToHomePosition({animate: false});
+        this._setVisualState('idle');
     }
 
     _removeFloatingButton() {
         if (!this._floatingButton || !this._floatingButtonAdded)
             return;
+        this._cancelLongPressTimer();
+        this._floatingState.pressed = false;
         Main.layoutManager.removeChrome(this._floatingButton);
         this._floatingButtonAdded = false;
     }
@@ -124,9 +143,7 @@ export default class TouchNavBackExtension extends Extension {
             icon_name: 'go-previous-symbolic',
             style_class: 'system-status-icon',
         }));
-        panelButton.connect('clicked', () => {
-            this._triggerBack();
-        });
+        panelButton.connect('clicked', () => this._triggerBack());
         this._getPanelBox(box).insert_child_at_index(panelButton, 0);
         this._panelButton = panelButton;
     }
@@ -146,22 +163,20 @@ export default class TouchNavBackExtension extends Extension {
         return section === 'left' ? left : section === 'center' ? center : right;
     }
 
-    _placeBottomRight() {
-        if (!this._floatingButton)
+    _ensureHomePosition() {
+        if (this._floatingState.homePosition)
             return;
-
         const monitor = Main.layoutManager.primaryMonitor;
-        if (!monitor)
+        if (!monitor || !this._floatingButton)
             return;
 
         const sf = St.ThemeContext.get_for_stage(global.stage).scaleFactor;
         const margin = Math.floor(18 * sf);
         const size = this._floatingButton.width;
-
-        this._floatingButton.set_position(
-            monitor.x + monitor.width - size - margin,
-            monitor.y + monitor.height - size - margin,
-        );
+        this._floatingState.homePosition = {
+            x: monitor.x + monitor.width - size - margin,
+            y: monitor.y + monitor.height - size - margin,
+        };
     }
 
     _onCapturedEvent(event) {
@@ -172,45 +187,255 @@ export default class TouchNavBackExtension extends Extension {
 
         switch (event.type()) {
             case Clutter.EventType.TOUCH_BEGIN:
-            case Clutter.EventType.BUTTON_PRESS: {
-                const [bx, by] = this._floatingButton.get_position();
-                this._dragging = false;
-                this._dragOffset = {x: x - bx, y: y - by};
-                this._dragStartPointer = {x, y};
-                return Clutter.EVENT_PROPAGATE;
-            }
-            case Clutter.EventType.TOUCH_UPDATE:
-            case Clutter.EventType.MOTION: {
-                const moved = Math.hypot(x - this._dragStartPointer.x, y - this._dragStartPointer.y) > 8;
-                if (!moved && !this._dragging)
-                    return Clutter.EVENT_PROPAGATE;
-
-                this._dragging = true;
-                this._didDragRecently = true;
-
-                this._floatingButton.set_position(x - this._dragOffset.x, y - this._dragOffset.y);
-                this._clampToCurrentMonitor();
+            case Clutter.EventType.BUTTON_PRESS:
+                this._onPressBegin(x, y);
                 return Clutter.EVENT_STOP;
-            }
+            case Clutter.EventType.TOUCH_UPDATE:
+            case Clutter.EventType.MOTION:
+                if (!this._floatingState.pressed)
+                    return Clutter.EVENT_PROPAGATE;
+                this._onPressMotion(x, y);
+                return Clutter.EVENT_STOP;
             case Clutter.EventType.TOUCH_END:
             case Clutter.EventType.TOUCH_CANCEL:
-            case Clutter.EventType.BUTTON_RELEASE: {
-                if (!this._dragging)
+            case Clutter.EventType.BUTTON_RELEASE:
+                if (!this._floatingState.pressed)
                     return Clutter.EVENT_PROPAGATE;
-
-                this._dragging = false;
-                GLib.timeout_add(GLib.PRIORITY_DEFAULT, 150, () => {
-                    this._didDragRecently = false;
-                    return GLib.SOURCE_REMOVE;
-                });
+                this._onPressEnd();
                 return Clutter.EVENT_STOP;
-            }
             default:
                 return Clutter.EVENT_PROPAGATE;
         }
     }
 
-    _clampToCurrentMonitor() {
+    _onPressBegin(x, y) {
+        this._cancelLongPressTimer();
+        this._ensureHomePosition();
+
+        const [bx, by] = this._floatingButton.get_position();
+        this._floatingState.pressed = true;
+        this._floatingState.gestureMode = false;
+        this._floatingState.repositionMode = false;
+        this._floatingState.activeAction = SwipeAction.none;
+        this._floatingState.pressStart = {x, y};
+        this._floatingState.dragOffset = {x: x - bx, y: y - by};
+        this._setVisualState('pressed');
+
+        this._floatingState.longPressTimeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, LONG_PRESS_MS, () => {
+            if (!this._floatingState.pressed || this._floatingState.gestureMode)
+                return GLib.SOURCE_REMOVE;
+            this._floatingState.repositionMode = true;
+            this._setVisualState('reposition');
+            this._floatingState.longPressTimeoutId = 0;
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _onPressMotion(x, y) {
+        const state = this._floatingState;
+        const dx = x - state.pressStart.x;
+        const dy = y - state.pressStart.y;
+        const distance = Math.hypot(dx, dy);
+
+        if (!state.repositionMode && !state.gestureMode && distance >= GESTURE_START_DISTANCE) {
+            state.gestureMode = true;
+            this._cancelLongPressTimer();
+        }
+
+        if (state.repositionMode) {
+            this._moveButtonWithOffset(x, y);
+            this._clampFloatingButtonToCurrentMonitor();
+            return;
+        }
+
+        if (state.gestureMode) {
+            this._moveButtonToPointerCenter(x, y);
+            this._clampFloatingButtonToCurrentMonitor();
+            const action = this._detectSwipeAction(dx, dy);
+            state.activeAction = action;
+            this._setVisualState(`preview-${action}`);
+        }
+    }
+
+    _onPressEnd() {
+        const state = this._floatingState;
+        this._cancelLongPressTimer();
+        state.pressed = false;
+
+        if (state.repositionMode) {
+            const [x, y] = this._floatingButton.get_position();
+            state.homePosition = {x, y};
+            state.repositionMode = false;
+            this._setVisualState('idle');
+            return;
+        }
+
+        if (state.gestureMode) {
+            const dx = this._floatingButton.get_position()[0] - state.homePosition.x;
+            const dy = this._floatingButton.get_position()[1] - state.homePosition.y;
+            const committed = Math.hypot(dx, dy) >= GESTURE_COMMIT_DISTANCE && state.activeAction !== SwipeAction.none;
+
+            if (committed) {
+                this._runSwipeAction(state.activeAction);
+                this._animateCommitPulse();
+            }
+
+            state.gestureMode = false;
+            state.activeAction = SwipeAction.none;
+            this._snapToHomePosition({animate: true});
+            this._setVisualState('idle');
+            return;
+        }
+
+        this._setVisualState('pressed-back');
+        this._triggerBack();
+        GLib.timeout_add(GLib.PRIORITY_DEFAULT, 120, () => {
+            this._setVisualState('idle');
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _cancelLongPressTimer() {
+        if (this._floatingState?.longPressTimeoutId) {
+            GLib.source_remove(this._floatingState.longPressTimeoutId);
+            this._floatingState.longPressTimeoutId = 0;
+        }
+    }
+
+    _moveButtonWithOffset(pointerX, pointerY) {
+        this._floatingButton.set_position(
+            pointerX - this._floatingState.dragOffset.x,
+            pointerY - this._floatingState.dragOffset.y,
+        );
+    }
+
+    _moveButtonToPointerCenter(pointerX, pointerY) {
+        const size = this._floatingButton.width;
+        this._floatingButton.set_position(pointerX - size / 2, pointerY - size / 2);
+    }
+
+    _snapToHomePosition({animate}) {
+        const home = this._floatingState.homePosition;
+        if (!home || !this._floatingButton)
+            return;
+
+        if (animate) {
+            this._floatingButton.ease({
+                x: home.x,
+                y: home.y,
+                duration: 140,
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+            });
+        } else {
+            this._floatingButton.set_position(home.x, home.y);
+        }
+    }
+
+    _detectSwipeAction(dx, dy) {
+        const absX = Math.abs(dx);
+        const absY = Math.abs(dy);
+
+        if (Math.hypot(dx, dy) < GESTURE_START_DISTANCE)
+            return SwipeAction.none;
+
+        if (absX > absY * DIRECTION_DOMINANCE) {
+            return dx < 0 ? SwipeAction.back : SwipeAction.none;
+        }
+        if (absY > absX * DIRECTION_DOMINANCE) {
+            return dy < 0 ? SwipeAction.overview : SwipeAction.apps;
+        }
+        return SwipeAction.none;
+    }
+
+    _runSwipeAction(action) {
+        switch (action) {
+            case SwipeAction.back:
+                this._triggerBack();
+                break;
+            case SwipeAction.overview:
+                this._triggerOverview();
+                break;
+            case SwipeAction.apps:
+                this._triggerApps();
+                break;
+            default:
+                break;
+        }
+    }
+
+    _setVisualState(state) {
+        if (!this._floatingButton || !this._floatingIcon)
+            return;
+
+        const classes = [
+            'tnav-back-button--pressed',
+            'tnav-back-button--reposition',
+            'tnav-back-button--preview-back',
+            'tnav-back-button--preview-overview',
+            'tnav-back-button--preview-apps',
+        ];
+        for (const c of classes)
+            this._floatingButton.remove_style_class_name(c);
+
+        switch (state) {
+            case 'idle':
+                this._floatingIcon.icon_name = 'media-record-symbolic';
+                this._floatingButton.set_scale(1.0, 1.0);
+                break;
+            case 'pressed':
+            case 'pressed-back':
+                this._floatingIcon.icon_name = 'go-previous-symbolic';
+                this._floatingButton.add_style_class_name('tnav-back-button--pressed');
+                this._floatingButton.ease({
+                    scale_x: 0.94,
+                    scale_y: 0.94,
+                    duration: 90,
+                    mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+                    onStopped: () => this._floatingButton.set_scale(1.0, 1.0),
+                });
+                break;
+            case 'reposition':
+                this._floatingIcon.icon_name = 'media-record-symbolic';
+                this._floatingButton.add_style_class_name('tnav-back-button--reposition');
+                break;
+            case `preview-${SwipeAction.back}`:
+                this._floatingIcon.icon_name = 'go-previous-symbolic';
+                this._floatingButton.add_style_class_name('tnav-back-button--preview-back');
+                break;
+            case `preview-${SwipeAction.overview}`:
+                this._floatingIcon.icon_name = 'view-grid-symbolic';
+                this._floatingButton.add_style_class_name('tnav-back-button--preview-overview');
+                break;
+            case `preview-${SwipeAction.apps}`:
+                this._floatingIcon.icon_name = 'view-app-grid-symbolic';
+                this._floatingButton.add_style_class_name('tnav-back-button--preview-apps');
+                break;
+            default:
+                this._floatingIcon.icon_name = 'media-record-symbolic';
+                break;
+        }
+    }
+
+    _animateCommitPulse() {
+        if (!this._floatingButton)
+            return;
+        this._floatingButton.ease({
+            scale_x: 1.13,
+            scale_y: 1.13,
+            duration: 90,
+            mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+            onStopped: () => {
+                this._floatingButton.ease({
+                    scale_x: 1.0,
+                    scale_y: 1.0,
+                    duration: 110,
+                    mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+                });
+            },
+        });
+    }
+
+    _clampFloatingButtonToCurrentMonitor() {
         if (!this._floatingButton)
             return;
 
@@ -229,17 +454,25 @@ export default class TouchNavBackExtension extends Extension {
         );
     }
 
+    _triggerOverview() {
+        Main.overview.show();
+        Main.overview.dash.showAppsButton.checked = false;
+    }
+
+    _triggerApps() {
+        Main.overview.show();
+        Main.overview.dash.showAppsButton.checked = true;
+    }
+
     _triggerBack() {
         const handled = this._smartBack();
         if (!handled) {
-            // Last-resort app navigation fallback.
             this._sendEsc();
             this._sendAltLeft();
         }
     }
 
     _smartBack() {
-        // 1) Close on-screen keyboard if visible.
         if (Main.keyboard.visible) {
             if (Main.keyboard._keyboard)
                 Main.keyboard._keyboard.close(true);
@@ -248,14 +481,12 @@ export default class TouchNavBackExtension extends Extension {
             return true;
         }
 
-        // 2) App drawer -> desktop directly.
         if (Main.overview.dash.showAppsButton.checked) {
             Main.overview.dash.showAppsButton.checked = false;
             Main.overview.hide();
             return true;
         }
 
-        // 3) Workspace/overview -> desktop.
         if (Main.overview.visible) {
             Main.overview.hide();
             return true;
@@ -263,7 +494,6 @@ export default class TouchNavBackExtension extends Extension {
 
         const focusWindow = global.display.focus_window;
 
-        // 4) Close transient/popups/dialog windows first.
         if (focusWindow?.can_close()) {
             const wt = focusWindow.get_window_type();
             const isTransientLike = (
@@ -282,13 +512,11 @@ export default class TouchNavBackExtension extends Extension {
             }
         }
 
-        // 5) Exit fullscreen.
         if (focusWindow?.is_fullscreen()) {
             focusWindow.unmake_fullscreen();
             return true;
         }
 
-        // 6) Leave app-level history/navigation to fallback key synthesis.
         return false;
     }
 
