@@ -17,6 +17,7 @@ const SNAP_DURATION_MS = 260;
 const PRESS_FEEDBACK_MS = 220;
 const COMMIT_PULSE_IN_MS = 180;
 const COMMIT_PULSE_OUT_MS = 240;
+const WATCHDOG_INTERVAL_S = 6;
 
 const SWITCHER_STEP_DISTANCE = 38;
 const SWITCHER_CANCEL_DISTANCE = 46;
@@ -59,9 +60,11 @@ export default class TouchNavExtension extends Extension {
         this._settings = this.getSettings('org.gnome.shell.extensions.tnav');
         this._settingsSchema = this._settings.settings_schema;
         this._settingsSignalIds = [];
+        this._runtimeSignalHandles = [];
         this._interfaceSettings = null;
         this._interfaceSettingsChangedId = 0;
         this._switcherSafetyTimeoutId = 0;
+        this._watchdogId = 0;
         this._visualState = 'idle';
         this._altHeld = false;
 
@@ -143,6 +146,8 @@ export default class TouchNavExtension extends Extension {
         if (this._hasSetting('click-action'))
             this._settingsSignalIds.push(this._settings.connect('changed::click-action', () => this._refreshFloatingStyle()));
 
+        this._connectRuntimeSignals();
+        this._startWatchdog();
         this._syncPlacement();
     }
 
@@ -151,6 +156,8 @@ export default class TouchNavExtension extends Extension {
         this._endWindowSwitcher({commit: false});
         this._clearSwitcherSafetyTimeout();
         this._releaseCommonModifiers();
+        this._stopWatchdog();
+        this._disconnectRuntimeSignals();
 
         this._settingsSignalIds?.forEach(id => this._settings.disconnect(id));
         this._settingsSignalIds = [];
@@ -177,6 +184,81 @@ export default class TouchNavExtension extends Extension {
         this._virtualKeyboardDevice = null;
         this._settingsSchema = null;
         this._settings = null;
+    }
+
+    _connectRuntimeSignals() {
+        this._runtimeSignalHandles.push(
+            this._connectIfPossible(Main.layoutManager, 'monitors-changed', () => this._onRuntimeGeometryChanged()),
+            this._connectIfPossible(global.display, 'workareas-changed', () => this._onRuntimeGeometryChanged()),
+        );
+    }
+
+    _disconnectRuntimeSignals() {
+        for (const handle of this._runtimeSignalHandles) {
+            if (!handle || !handle.obj || !handle.id)
+                continue;
+            try {
+                handle.obj.disconnect(handle.id);
+            } catch (_e) {
+            }
+        }
+        this._runtimeSignalHandles = [];
+    }
+
+    _connectIfPossible(obj, signal, callback) {
+        try {
+            return {obj, id: obj.connect(signal, callback)};
+        } catch (_e) {
+            return null;
+        }
+    }
+
+    _startWatchdog() {
+        this._stopWatchdog();
+        this._watchdogId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, WATCHDOG_INTERVAL_S, () => {
+            this._ensureFloatingVisible();
+            return GLib.SOURCE_CONTINUE;
+        });
+    }
+
+    _stopWatchdog() {
+        if (!this._watchdogId)
+            return;
+        GLib.source_remove(this._watchdogId);
+        this._watchdogId = 0;
+    }
+
+    _onRuntimeGeometryChanged() {
+        if (!this._settings?.get_boolean('floating'))
+            return;
+        this._ensureFloatingVisible();
+    }
+
+    _ensureFloatingVisible() {
+        if (!this._settings?.get_boolean('floating'))
+            return;
+        if (!this._floatingButton)
+            return;
+        if (this._floatingState?.repositionMode || this._floatingState?.pressed)
+            return;
+
+        if (!this._floatingButtonAdded || !this._floatingButton.get_parent()) {
+            try {
+                Main.layoutManager.addTopChrome(this._floatingButton, {
+                    affectsStruts: false,
+                    trackFullscreen: true,
+                });
+                this._floatingButtonAdded = true;
+            } catch (_e) {
+                return;
+            }
+        }
+
+        this._floatingButton.visible = true;
+        this._ensureHomePosition();
+        this._snapHomeToNearestEdge();
+        this._snapToHomePosition({animate: false});
+        this._setVisualState('idle');
     }
 
     _hasSetting(key) {
