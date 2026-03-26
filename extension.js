@@ -4,10 +4,14 @@ import GLib from 'gi://GLib';
 import Mtk from 'gi://Mtk';
 import Meta from 'gi://Meta';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
 export default class TouchNavBackExtension extends Extension {
     enable() {
+        this._settings = this.getSettings('org.gnome.shell.extensions.tnav');
+        this._settingsSignalIds = [];
+
         this._dragging = false;
         this._didDragRecently = false;
         this._dragOffset = {x: 0, y: 0};
@@ -21,7 +25,7 @@ export default class TouchNavBackExtension extends Extension {
             .get_default_seat()
             .create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
 
-        this._button = new St.Button({
+        this._floatingButton = new St.Button({
             style_class: 'tnav-back-button',
             reactive: true,
             can_focus: true,
@@ -29,41 +33,110 @@ export default class TouchNavBackExtension extends Extension {
             width: size,
             height: size,
         });
-        this._button.set_child(new St.Icon({
+        this._floatingButton.set_child(new St.Icon({
             icon_name: 'go-previous-symbolic',
             icon_size: Math.floor(19 * sf),
         }));
 
-        this._button.connect('clicked', () => {
+        this._floatingButton.connect('clicked', () => {
             if (!this._didDragRecently)
                 this._triggerBack();
         });
 
-        this._capturedEventId = this._button.connect('captured-event', (_w, event) => this._onCapturedEvent(event));
+        this._capturedEventId = this._floatingButton.connect('captured-event', (_w, event) => this._onCapturedEvent(event));
 
-        Main.layoutManager.addTopChrome(this._button, {
-            affectsStruts: false,
-            trackFullscreen: true,
-        });
+        this._settingsSignalIds.push(
+            this._settings.connect('changed::floating', () => this._syncPlacement()),
+            this._settings.connect('changed::panel-section', () => this._syncPlacement()),
+        );
 
-        this._placeBottomRight();
+        this._syncPlacement();
     }
 
     disable() {
-        if (this._button) {
-            if (this._capturedEventId)
-                this._button.disconnect(this._capturedEventId);
+        this._settingsSignalIds?.forEach((id) => this._settings.disconnect(id));
+        this._settingsSignalIds = [];
 
-            Main.layoutManager.removeChrome(this._button);
-            this._button.destroy();
-            this._button = null;
+        if (this._floatingButton) {
+            if (this._capturedEventId)
+                this._floatingButton.disconnect(this._capturedEventId);
+
+            if (this._floatingButtonAdded) {
+                Main.layoutManager.removeChrome(this._floatingButton);
+            }
+            this._floatingButton.destroy();
+            this._floatingButton = null;
         }
 
+        this._removePanelButton();
+
         this._virtualKeyboardDevice = null;
+        this._settings = null;
+    }
+
+    _syncPlacement() {
+        if (!this._settings)
+            return;
+
+        const floating = this._settings.get_boolean('floating');
+        const section = this._settings.get_string('panel-section');
+
+        if (floating) {
+            this._removePanelButton();
+            this._ensureFloatingButton();
+        } else {
+            this._removeFloatingButton();
+            this._ensurePanelButton(section);
+        }
+    }
+
+    _ensureFloatingButton() {
+        if (!this._floatingButton)
+            return;
+        if (!this._floatingButtonAdded) {
+            Main.layoutManager.addTopChrome(this._floatingButton, {
+                affectsStruts: false,
+                trackFullscreen: true,
+            });
+            this._floatingButtonAdded = true;
+        }
+        this._placeBottomRight();
+    }
+
+    _removeFloatingButton() {
+        if (!this._floatingButton || !this._floatingButtonAdded)
+            return;
+        Main.layoutManager.removeChrome(this._floatingButton);
+        this._floatingButtonAdded = false;
+    }
+
+    _ensurePanelButton(section) {
+        if (this._panelButton)
+            this._removePanelButton();
+
+        const box = ['left', 'center', 'right'].includes(section) ? section : 'right';
+        const panelButton = new PanelMenu.Button(0.0, 'tnav-back-panel-button', true);
+        panelButton.add_child(new St.Icon({
+            icon_name: 'go-previous-symbolic',
+            style_class: 'system-status-icon',
+        }));
+        panelButton.connect('button-press-event', () => {
+            this._triggerBack();
+            return Clutter.EVENT_STOP;
+        });
+        Main.panel.addToStatusArea('tnav-back-panel-button', panelButton, 0, box);
+        this._panelButton = panelButton;
+    }
+
+    _removePanelButton() {
+        if (!this._panelButton)
+            return;
+        this._panelButton.destroy();
+        this._panelButton = null;
     }
 
     _placeBottomRight() {
-        if (!this._button)
+        if (!this._floatingButton)
             return;
 
         const monitor = Main.layoutManager.primaryMonitor;
@@ -72,16 +145,16 @@ export default class TouchNavBackExtension extends Extension {
 
         const sf = St.ThemeContext.get_for_stage(global.stage).scaleFactor;
         const margin = Math.floor(18 * sf);
-        const size = this._button.width;
+        const size = this._floatingButton.width;
 
-        this._button.set_position(
+        this._floatingButton.set_position(
             monitor.x + monitor.width - size - margin,
             monitor.y + monitor.height - size - margin,
         );
     }
 
     _onCapturedEvent(event) {
-        if (!this._button)
+        if (!this._floatingButton || !this._floatingButtonAdded)
             return Clutter.EVENT_PROPAGATE;
 
         const [x, y] = event.get_coords();
@@ -89,7 +162,7 @@ export default class TouchNavBackExtension extends Extension {
         switch (event.type()) {
             case Clutter.EventType.TOUCH_BEGIN:
             case Clutter.EventType.BUTTON_PRESS: {
-                const [bx, by] = this._button.get_position();
+                const [bx, by] = this._floatingButton.get_position();
                 this._dragging = false;
                 this._dragOffset = {x: x - bx, y: y - by};
                 this._dragStartPointer = {x, y};
@@ -104,7 +177,7 @@ export default class TouchNavBackExtension extends Extension {
                 this._dragging = true;
                 this._didDragRecently = true;
 
-                this._button.set_position(x - this._dragOffset.x, y - this._dragOffset.y);
+                this._floatingButton.set_position(x - this._dragOffset.x, y - this._dragOffset.y);
                 this._clampToCurrentMonitor();
                 return Clutter.EVENT_STOP;
             }
@@ -127,19 +200,19 @@ export default class TouchNavBackExtension extends Extension {
     }
 
     _clampToCurrentMonitor() {
-        if (!this._button)
+        if (!this._floatingButton)
             return;
 
-        const [x, y] = this._button.get_position();
+        const [x, y] = this._floatingButton.get_position();
         const rect = new Mtk.Rectangle({x, y, width: 1, height: 1});
         const monitorIndex = global.display.get_monitor_index_for_rect(rect);
         const monitor = global.display.get_monitor_geometry(monitorIndex);
 
         const sf = St.ThemeContext.get_for_stage(global.stage).scaleFactor;
         const margin = Math.floor(6 * sf);
-        const size = this._button.width;
+        const size = this._floatingButton.width;
 
-        this._button.set_position(
+        this._floatingButton.set_position(
             Math.max(monitor.x + margin, Math.min(x, monitor.x + monitor.width - size - margin)),
             Math.max(monitor.y + margin, Math.min(y, monitor.y + monitor.height - size - margin)),
         );

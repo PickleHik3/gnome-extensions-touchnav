@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.tnav" path="/org/gnome/shell/extensions/tnav/">
+    <key name="floating" type="b">
+      <default>true</default>
+      <summary>Show as floating button</summary>
+      <description>If true, show the back button as a draggable floating button; otherwise show it in the top panel.</description>
+    </key>
+
+    <key name="panel-section" type="s">
+      <default>'right'</default>
+      <choices>
+        <choice value='left'/>
+        <choice value='center'/>
+        <choice value='right'/>
+      </choices>
+      <summary>Panel section</summary>
+      <description>Panel box section where the button is shown when floating is disabled.</description>
+    </key>
+  </schema>
+</schemalist>

@@ -3,6 +3,7 @@
   "name": "Touch Nav Back",
   "description": "Standalone floating back button for GNOME Shell.",
   "shell-version": ["47", "48", "49"],
-  "version": 1,
-  "url": "https://github.com/amalv/gnome-extension-tnav"
+  "settings-schema": "org.gnome.shell.extensions.tnav",
+  "version": 2,
+  "url": "https://github.com/PickleHik3/gnome-extension-tnav"
 }
