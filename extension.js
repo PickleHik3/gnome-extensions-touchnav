@@ -2,6 +2,7 @@ import St from 'gi://St';
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 import Mtk from 'gi://Mtk';
+import Meta from 'gi://Meta';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
@@ -145,9 +146,80 @@ export default class TouchNavBackExtension extends Extension {
     }
 
     _triggerBack() {
-        const t = Clutter.get_current_event_time() * 1000;
+        const handled = this._smartBack();
+        if (!handled) {
+            // Last-resort app navigation fallback.
+            this._sendEsc();
+            this._sendAltLeft();
+        }
+    }
 
-        // Send Alt+Left for browser-style back navigation.
+    _smartBack() {
+        // 1) Close on-screen keyboard if visible.
+        if (Main.keyboard.visible) {
+            if (Main.keyboard._keyboard)
+                Main.keyboard._keyboard.close(true);
+            else
+                Main.keyboard.close();
+            return true;
+        }
+
+        // 2) App drawer -> desktop directly.
+        if (Main.overview.dash.showAppsButton.checked) {
+            Main.overview.dash.showAppsButton.checked = false;
+            Main.overview.hide();
+            return true;
+        }
+
+        // 3) Workspace/overview -> desktop.
+        if (Main.overview.visible) {
+            Main.overview.hide();
+            return true;
+        }
+
+        const focusWindow = global.display.focus_window;
+
+        // 4) Close transient/popups/dialog windows first.
+        if (focusWindow?.can_close()) {
+            const wt = focusWindow.get_window_type();
+            const isTransientLike = (
+                wt === Meta.WindowType.DIALOG ||
+                wt === Meta.WindowType.MODAL_DIALOG ||
+                wt === Meta.WindowType.MENU ||
+                wt === Meta.WindowType.DROPDOWN_MENU ||
+                wt === Meta.WindowType.POPUP_MENU ||
+                wt === Meta.WindowType.COMBO ||
+                wt === Meta.WindowType.DND ||
+                focusWindow.get_transient_for() !== null
+            );
+            if (isTransientLike) {
+                focusWindow.delete(global.get_current_time());
+                return true;
+            }
+        }
+
+        // 5) Exit fullscreen.
+        if (focusWindow?.is_fullscreen()) {
+            focusWindow.unmake_fullscreen();
+            return true;
+        }
+
+        // 6) Leave app-level history/navigation to fallback key synthesis.
+        return false;
+    }
+
+    _sendEsc() {
+        if (!this._virtualKeyboardDevice)
+            return;
+        const t = Clutter.get_current_event_time() * 1000;
+        this._virtualKeyboardDevice.notify_keyval(t, Clutter.KEY_Escape, Clutter.KeyState.PRESSED);
+        this._virtualKeyboardDevice.notify_keyval(t, Clutter.KEY_Escape, Clutter.KeyState.RELEASED);
+    }
+
+    _sendAltLeft() {
+        if (!this._virtualKeyboardDevice)
+            return;
+        const t = Clutter.get_current_event_time() * 1000;
         this._virtualKeyboardDevice.notify_keyval(t, Clutter.KEY_Alt_L, Clutter.KeyState.PRESSED);
         this._virtualKeyboardDevice.notify_keyval(t, Clutter.KEY_Left, Clutter.KeyState.PRESSED);
         this._virtualKeyboardDevice.notify_keyval(t, Clutter.KEY_Left, Clutter.KeyState.RELEASED);
