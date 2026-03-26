@@ -3,12 +3,12 @@ import Gtk from 'gi://Gtk';
 import Gdk from 'gi://Gdk';
 import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
-export default class TouchNavBackPrefs extends ExtensionPreferences {
+export default class TouchNavPrefs extends ExtensionPreferences {
     fillPreferencesWindow(window) {
         const settings = this.getSettings('org.gnome.shell.extensions.tnav');
 
         const page = new Adw.PreferencesPage({
-            title: 'Touchnav',
+            title: 'TouchNav',
             icon_name: 'preferences-system-symbolic',
         });
 
@@ -87,9 +87,37 @@ export default class TouchNavBackPrefs extends ExtensionPreferences {
 
         const gestures = new Adw.PreferencesGroup({title: 'Swipe Actions'});
         const actions = {
-            values: ['none', 'back', 'overview', 'apps'],
-            labels: ['None', 'Back', 'Overview/Workspaces', 'Apps Launcher'],
+            values: [
+                'none',
+                'back',
+                'overview',
+                'apps',
+                'show-desktop',
+                'workspace-left',
+                'workspace-right',
+                'window-switcher-joystick',
+                'close-window',
+            ],
+            labels: [
+                'None',
+                'Back',
+                'Overview/Workspaces',
+                'Apps Launcher',
+                'Show Desktop',
+                'Workspace Left',
+                'Workspace Right',
+                'Window Switcher (Joystick)',
+                'Close Window',
+            ],
         };
+
+        gestures.add(this._buildDropdownRow({
+            title: 'Tap / Click',
+            values: actions.values,
+            labels: actions.labels,
+            get: () => settings.get_string('click-action'),
+            set: (v) => settings.set_string('click-action', v),
+        }).row);
 
         gestures.add(this._buildDropdownRow({
             title: 'Swipe Left',

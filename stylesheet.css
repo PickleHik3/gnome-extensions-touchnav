@@ -41,3 +41,15 @@
 .tnav-back-button--preview-apps {
   box-shadow: 0 0 16px rgba(255, 170, 92, 0.42);
 }
+
+.tnav-back-button--preview-workspace {
+  box-shadow: 0 0 16px rgba(129, 178, 244, 0.42);
+}
+
+.tnav-back-button--preview-switcher {
+  box-shadow: 0 0 16px rgba(190, 150, 255, 0.42);
+}
+
+.tnav-back-button--preview-close {
+  box-shadow: 0 0 16px rgba(255, 130, 130, 0.42);
+}

@@ -37,6 +37,23 @@
       <description>Hex color used for the floating button background when GNOME default color is disabled.</description>
     </key>
 
+    <key name="click-action" type="s">
+      <default>'back'</default>
+      <choices>
+        <choice value='none'/>
+        <choice value='back'/>
+        <choice value='overview'/>
+        <choice value='apps'/>
+        <choice value='show-desktop'/>
+        <choice value='workspace-left'/>
+        <choice value='workspace-right'/>
+        <choice value='window-switcher-joystick'/>
+        <choice value='close-window'/>
+      </choices>
+      <summary>Tap action</summary>
+      <description>Action executed when tapping the floating button.</description>
+    </key>
+
     <key name="swipe-left-action" type="s">
       <default>'back'</default>
       <choices>
@@ -44,6 +61,11 @@
         <choice value='back'/>
         <choice value='overview'/>
         <choice value='apps'/>
+        <choice value='show-desktop'/>
+        <choice value='workspace-left'/>
+        <choice value='workspace-right'/>
+        <choice value='window-switcher-joystick'/>
+        <choice value='close-window'/>
       </choices>
       <summary>Swipe left action</summary>
       <description>Action executed when swiping left from the floating button.</description>
@@ -56,6 +78,11 @@
         <choice value='back'/>
         <choice value='overview'/>
         <choice value='apps'/>
+        <choice value='show-desktop'/>
+        <choice value='workspace-left'/>
+        <choice value='workspace-right'/>
+        <choice value='window-switcher-joystick'/>
+        <choice value='close-window'/>
       </choices>
       <summary>Swipe up action</summary>
       <description>Action executed when swiping up from the floating button.</description>
@@ -68,6 +95,11 @@
         <choice value='back'/>
         <choice value='overview'/>
         <choice value='apps'/>
+        <choice value='show-desktop'/>
+        <choice value='workspace-left'/>
+        <choice value='workspace-right'/>
+        <choice value='window-switcher-joystick'/>
+        <choice value='close-window'/>
       </choices>
       <summary>Swipe down action</summary>
       <description>Action executed when swiping down from the floating button.</description>
@@ -80,6 +112,11 @@
         <choice value='back'/>
         <choice value='overview'/>
         <choice value='apps'/>
+        <choice value='show-desktop'/>
+        <choice value='workspace-left'/>
+        <choice value='workspace-right'/>
+        <choice value='window-switcher-joystick'/>
+        <choice value='close-window'/>
       </choices>
       <summary>Swipe right action</summary>
       <description>Action executed when swiping right from the floating button.</description>
