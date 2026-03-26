@@ -1,0 +1,9 @@
+.tnav-back-button {
+  background-color: rgba(24, 24, 24, 0.92);
+  border-radius: 999px;
+  color: white;
+}
+
+.tnav-back-button:hover {
+  background-color: rgba(36, 36, 36, 0.95);
+}
