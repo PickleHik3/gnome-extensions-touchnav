@@ -87,6 +87,7 @@ export default class TouchNavPrefs extends ExtensionPreferences {
             values: [
                 'none',
                 'back',
+                'forward',
                 'overview',
                 'apps',
                 'show-desktop',
@@ -98,6 +99,7 @@ export default class TouchNavPrefs extends ExtensionPreferences {
             labels: [
                 'None',
                 'Back',
+                'Forward',
                 'Overview/Workspaces',
                 'Apps Launcher',
                 'Show Desktop',

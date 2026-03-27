@@ -27,6 +27,7 @@ const DEFAULT_BASE_COLOR = {r: 22, g: 22, b: 22};
 const Action = Object.freeze({
     none: 'none',
     back: 'back',
+    forward: 'forward',
     overview: 'overview',
     apps: 'apps',
     showDesktop: 'show-desktop',
@@ -77,6 +78,7 @@ export default class TouchNavExtension extends Extension {
             switcherReferenceX: 0,
             gestureDelta: {x: 0, y: 0},
             pressStart: {x: 0, y: 0},
+            pressMonitor: null,
             dragOffset: {x: 0, y: 0},
             activeAction: Action.none,
             longPressTimeoutId: 0,
@@ -420,6 +422,7 @@ export default class TouchNavExtension extends Extension {
         this._floatingState.switcherReferenceX = x;
         this._floatingState.gestureDelta = {x: 0, y: 0};
         this._floatingState.pressStart = {x, y};
+        this._floatingState.pressMonitor = this._monitorForPoint(x, y);
         this._floatingState.dragOffset = {x: x - bx, y: y - by};
 
         this._setVisualState('pressed');
@@ -457,18 +460,20 @@ export default class TouchNavExtension extends Extension {
 
         const action = this._detectSwipeAction(dx, dy);
         state.gestureDelta = {x: dx, y: dy};
+        const dominantDirection = this._dominantDirection(dx, dy);
 
         this._moveButtonWithGestureNudge(dx, dy);
 
         if (state.switcherActive) {
-            this._updateWindowSwitcherJoystick(x, dx, dy);
+            this._updateWindowSwitcherJoystick(dx, dy);
             this._setVisualState(`preview-${Action.windowSwitcherJoystick}`);
             return;
         }
 
         if (action === Action.windowSwitcherJoystick) {
-            if (!state.switcherActive && distance >= GESTURE_COMMIT_DISTANCE)
-                this._startWindowSwitcherJoystick(x);
+            const switcherCommitThreshold = this._commitThresholdForDirection(dominantDirection);
+            if (!state.switcherActive && distance >= switcherCommitThreshold)
+                this._startWindowSwitcherJoystick();
         }
 
         state.activeAction = action;
@@ -495,10 +500,12 @@ export default class TouchNavExtension extends Extension {
             if (state.switcherActive)
                 this._endWindowSwitcher({commit: !state.switcherCancelled});
             else {
-                const committed = Math.hypot(state.gestureDelta.x, state.gestureDelta.y) >= GESTURE_COMMIT_DISTANCE &&
+                const dominantDirection = this._dominantDirection(state.gestureDelta.x, state.gestureDelta.y);
+                const commitThreshold = this._commitThresholdForDirection(dominantDirection);
+                const committedByThreshold = Math.hypot(state.gestureDelta.x, state.gestureDelta.y) >= commitThreshold &&
                     state.activeAction !== Action.none;
 
-                if (committed) {
+                if (committedByThreshold) {
                     this._runAction(state.activeAction, {fromGesture: true});
                     this._animateCommitPulse();
                 }
@@ -636,6 +643,44 @@ export default class TouchNavExtension extends Extension {
         return Action.none;
     }
 
+    _dominantDirection(dx, dy) {
+        const absX = Math.abs(dx);
+        const absY = Math.abs(dy);
+        if (absX > absY * DIRECTION_DOMINANCE)
+            return dx < 0 ? 'left' : 'right';
+        if (absY > absX * DIRECTION_DOMINANCE)
+            return dy < 0 ? 'up' : 'down';
+        return null;
+    }
+
+    _commitThresholdForDirection(direction) {
+        if (!direction || !this._floatingState.pressMonitor || !this._floatingState.pressStart)
+            return GESTURE_COMMIT_DISTANCE;
+
+        const monitor = this._floatingState.pressMonitor;
+        const {x, y} = this._floatingState.pressStart;
+        const edgeMargin = 2;
+        let available = GESTURE_COMMIT_DISTANCE;
+
+        if (direction === 'left')
+            available = x - (monitor.x + edgeMargin);
+        else if (direction === 'right')
+            available = (monitor.x + monitor.width - edgeMargin) - x;
+        else if (direction === 'up')
+            available = y - (monitor.y + edgeMargin);
+        else if (direction === 'down')
+            available = (monitor.y + monitor.height - edgeMargin) - y;
+
+        return Math.max(14, Math.min(GESTURE_COMMIT_DISTANCE, available * 0.6));
+    }
+
+    _directionalSwipeGain(direction) {
+        const threshold = this._commitThresholdForDirection(direction);
+        if (!threshold)
+            return 1;
+        return Math.max(1, GESTURE_COMMIT_DISTANCE / threshold);
+    }
+
     _actionForDirection(direction) {
         const key = SWIPE_KEYS[direction];
         if (!key || !this._settings)
@@ -659,6 +704,9 @@ export default class TouchNavExtension extends Extension {
                 break;
             case Action.back:
                 this._triggerBack();
+                break;
+            case Action.forward:
+                this._triggerForward();
                 break;
             case Action.overview:
                 this._triggerOverview();
@@ -687,17 +735,17 @@ export default class TouchNavExtension extends Extension {
         }
     }
 
-    _startWindowSwitcherJoystick(pointerX) {
+    _startWindowSwitcherJoystick() {
         const state = this._floatingState;
         this._pressAlt();
         this._sendTabStep(+1);
         state.switcherActive = true;
         state.switcherCancelled = false;
-        state.switcherReferenceX = pointerX;
+        state.switcherReferenceX = state.pressStart.x;
         this._armSwitcherSafetyTimeout();
     }
 
-    _updateWindowSwitcherJoystick(pointerX, dx, dy) {
+    _updateWindowSwitcherJoystick(dx, dy) {
         const state = this._floatingState;
         if (!state.switcherActive)
             return;
@@ -712,13 +760,15 @@ export default class TouchNavExtension extends Extension {
             return;
 
         this._armSwitcherSafetyTimeout();
+        const directionGain = dx >= 0 ? this._directionalSwipeGain('right') : this._directionalSwipeGain('left');
+        const virtualX = state.pressStart.x + dx * directionGain;
 
-        while (pointerX - state.switcherReferenceX >= SWITCHER_STEP_DISTANCE) {
+        while (virtualX - state.switcherReferenceX >= SWITCHER_STEP_DISTANCE) {
             this._sendTabStep(+1);
             state.switcherReferenceX += SWITCHER_STEP_DISTANCE;
         }
 
-        while (pointerX - state.switcherReferenceX <= -SWITCHER_STEP_DISTANCE) {
+        while (virtualX - state.switcherReferenceX <= -SWITCHER_STEP_DISTANCE) {
             this._sendTabStep(-1);
             state.switcherReferenceX -= SWITCHER_STEP_DISTANCE;
         }
@@ -780,6 +830,7 @@ export default class TouchNavExtension extends Extension {
 
         const iconForAction = {
             [Action.back]: 'go-previous-symbolic',
+            [Action.forward]: 'go-next-symbolic',
             [Action.overview]: 'focus-windows-symbolic',
             [Action.apps]: 'view-app-grid-symbolic',
             [Action.showDesktop]: 'user-desktop-symbolic',
@@ -813,7 +864,7 @@ export default class TouchNavExtension extends Extension {
             this._floatingIcon.icon_name = iconForAction[action] ?? 'go-previous-symbolic';
             this._floatingIcon.opacity = action === Action.none ? 0 : 255;
 
-            if (action === Action.back)
+            if (action === Action.back || action === Action.forward)
                 this._floatingButton.add_style_class_name('tnav-back-button--preview-back');
             else if (action === Action.overview || action === Action.showDesktop)
                 this._floatingButton.add_style_class_name('tnav-back-button--preview-overview');
@@ -1060,6 +1111,14 @@ export default class TouchNavExtension extends Extension {
         this._sendAltLeftCombo();
     }
 
+    _triggerForward() {
+        if (this._looksLikeBrowser(global.display.focus_window)) {
+            if (this._tapForwardKey())
+                return;
+        }
+        this._sendAltRightCombo();
+    }
+
     _looksLikeBrowser(window) {
         const wmClass = window?.get_wm_class?.();
         if (!wmClass)
@@ -1085,12 +1144,32 @@ export default class TouchNavExtension extends Extension {
         return true;
     }
 
+    _tapForwardKey() {
+        if (!this._virtualKeyboardDevice)
+            return false;
+        const key = Clutter.KEY_XF86Forward ?? Clutter.KEY_Forward;
+        if (!key)
+            return false;
+        this._tapKey(key);
+        return true;
+    }
+
     _sendAltLeftCombo() {
         if (!this._virtualKeyboardDevice)
             return;
         this._notifyKey(Clutter.KEY_Alt_L, Clutter.KeyState.PRESSED);
         this._notifyKey(Clutter.KEY_Left, Clutter.KeyState.PRESSED);
         this._notifyKey(Clutter.KEY_Left, Clutter.KeyState.RELEASED);
+        this._notifyKey(Clutter.KEY_Alt_L, Clutter.KeyState.RELEASED);
+        this._altHeld = false;
+    }
+
+    _sendAltRightCombo() {
+        if (!this._virtualKeyboardDevice)
+            return;
+        this._notifyKey(Clutter.KEY_Alt_L, Clutter.KeyState.PRESSED);
+        this._notifyKey(Clutter.KEY_Right, Clutter.KeyState.PRESSED);
+        this._notifyKey(Clutter.KEY_Right, Clutter.KeyState.RELEASED);
         this._notifyKey(Clutter.KEY_Alt_L, Clutter.KeyState.RELEASED);
         this._altHeld = false;
     }

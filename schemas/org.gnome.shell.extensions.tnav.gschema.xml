@@ -54,6 +54,7 @@
       <choices>
         <choice value='none'/>
         <choice value='back'/>
+        <choice value='forward'/>
         <choice value='overview'/>
         <choice value='apps'/>
         <choice value='show-desktop'/>
@@ -71,6 +72,7 @@
       <choices>
         <choice value='none'/>
         <choice value='back'/>
+        <choice value='forward'/>
         <choice value='overview'/>
         <choice value='apps'/>
         <choice value='show-desktop'/>
@@ -88,6 +90,7 @@
       <choices>
         <choice value='none'/>
         <choice value='back'/>
+        <choice value='forward'/>
         <choice value='overview'/>
         <choice value='apps'/>
         <choice value='show-desktop'/>
@@ -105,6 +108,7 @@
       <choices>
         <choice value='none'/>
         <choice value='back'/>
+        <choice value='forward'/>
         <choice value='overview'/>
         <choice value='apps'/>
         <choice value='show-desktop'/>
@@ -122,6 +126,7 @@
       <choices>
         <choice value='none'/>
         <choice value='back'/>
+        <choice value='forward'/>
         <choice value='overview'/>
         <choice value='apps'/>
         <choice value='show-desktop'/>
