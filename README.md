@@ -1,16 +1,36 @@
-# gnome-extensions-touchnav
+# TouchNav
 
-Standalone GNOME Shell extension that provides a floating touch navigation button.
+Floating navigation button for GNOME Shell.
 
-## Install locally
+## Features
 
-1. Copy this directory to:
+- Floating pill or panel button mode
+- Tap + swipe actions (up, down, left, right)
+- Actions:
+  - `None`
+  - `Back`
+  - `Forward`
+  - `Overview/Workspaces`
+  - `Apps Launcher`
+  - `Show Desktop`
+  - `Workspace Left`
+  - `Workspace Right`
+  - `Alt Tab`
+  - `Close Window`
+- Long-press and drag to move pill
+- Position is saved across reboot/login
+- Opacity and color controls
+- System accent color support
+
+## Install (local)
+
+1. Copy folder to:
    `~/.local/share/gnome-shell/extensions/tnav@picklehik3.github.io`
-2. Enable with:
+2. Compile schema:
+   `glib-compile-schemas ~/.local/share/gnome-shell/extensions/tnav@picklehik3.github.io/schemas`
+3. Enable:
    `gnome-extensions enable tnav@picklehik3.github.io`
 
-## Behavior
+## Open Settings
 
-- Tap: Smart back chain (hide apps grid/overview, close transient UI, then back key events)
-- Long-press + drag: reposition button, then it snaps to nearest screen edge
-- Swipe directions: configurable actions (`none`, `back`, `overview`, `apps`)
+`gnome-extensions prefs tnav@picklehik3.github.io`
